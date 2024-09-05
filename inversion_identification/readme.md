@@ -7,5 +7,5 @@ LD calculation along the contigs
 
 
 supporting files: 
-populations_meta.txt
+populations_meta.txt,
 sample_info.tsv
