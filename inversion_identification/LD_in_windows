@@ -1,4 +1,6 @@
 #After the initial LD calculations we then summarize LD per 10000 pb window for each of the analyzed contigs 
+#It is done so the upper triangle has the LD calculated only in the individuals that are homozygous for one orientation with the majour
+#frequency. Lower triangle show the LD calculated for all individuals
 #It is better to run this code on the backround concerning that it is considerably slow 
 
 
