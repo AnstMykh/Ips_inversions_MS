@@ -6,6 +6,6 @@ Here you can find scripts for a various satistical analysis we have performed in
 
 - Admixture analysis using NGSadmix
 
-- FST estimation in 100kb
+- FST estimation in 100K bp
 
-- Nucleotide diversity and Tajima's D estimated with ANGSD 
+- Nucleotide diversity and Tajima's D estimated with ANGSD in widdows, tested 200 100 and 50K bp
