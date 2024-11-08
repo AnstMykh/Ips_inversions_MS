@@ -12,4 +12,4 @@ Here you can find scripts for a various satistical analysis we have performed in
 
 - Nucleotide diversity and Tajima's D estimated with ANGSD in widdows, tested 200 100 and 50K bp
 
-- script calculating the dencity of genes in every inversion 
+- script calculating the density of genes in every inversion 
