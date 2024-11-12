@@ -10,7 +10,7 @@ This repository provides scripts associated with the publication "Complex Genomi
 
 - Estimation of mutation load
 
-- Testing for phenotype-genotype associations, specifically the presence of olfactory receptor genes within inverted regions and also if the ability to go into the diapause is assosiated with inversions
+- Testing for phenotype-genotype associations, specifically the presence of olfactory receptor genes within inverted regions
 
 - Genotype-environment association (GEA) analyses
 
