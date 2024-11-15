@@ -1,0 +1,187 @@
+---
+title: "Ips GO enrichment"
+author: "W. Babik"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)#, warning = FALSE)
+library(topGO)
+library(tidyverse)
+library(knitr)
+```
+
+# Are specific GO categories overrepresented in inversions, or inversions that correlate with latitude?
+
+First define function that does enrichment analysis for all three main GO types
+
+```{r}
+## Function that does enrichment analysis for all three main GO types ----
+test3GOs <- function(gl, gomap = GOmap){
+  types <- c("BP", "MF", "CC")
+  res <- NULL
+  for (t in types){
+    GOdata <- new("topGOdata", ontology = t, allGenes = gl,
+                  nodeSize = 10,
+                  annot = topGO::annFUN.gene2GO, gene2GO = gomap[names(gl)])
+    fw <- runTest(GOdata, algorithm = "weight01", statistic = "fisher")
+    fe <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    gt <- GenTable(GOdata, wFisher = fw, eFisher = fe, orderBy = "wFisher", topNodes = 50) %>% 
+      mutate(type = t,
+             rank = 1:n())
+    res_list <- list(GOdata = GOdata,
+                     weight01 = fw,
+                     elim = fe,
+                     GenTable = gt)
+    res[[t]] <- res_list
+  }
+  return(res)
+}
+
+```
+
+Prepare `.bed` files and calculate distances of genes from inversions
+
+```{bash, eval = FALSE}
+invinfo=Inversion_info.txt
+iallbed=Inversions_all.bed
+icorbed=Inversions_correlated.bed
+gbed=Ips_genes.bed
+gff=Ityp_1.0.gff3
+gf=Ips_genome_file.txt
+cl_inv=closest_inversion_to_gene.txt
+cl_inv_ess=closest_inversion_to_gene_essential.txt
+
+#generate inversion bed
+
+awk 'BEGIN{FS=OFS="\t"} /IpsContig/ {print $2, $3, $4, $1}' $invinfo  | sort -k1,1 -k2,2n > $iallbed
+awk 'BEGIN{FS=OFS="\t"} /IpsContig/ && $9 ~ /YES/ {print $2, $3, $4, $1}' $invinfo | sort -k1,1 -k2,2n > $icorbed
+
+#generate gene bed
+
+awk 'BEGIN{FS=OFS="\t"} $3 ~ /gene/ {print $1, $4-1, $5, $9, "0", $7 }' $gff | sort -k1,1 -k2,2n > $gbed
+
+#overlap between genes and inversions
+
+bedtools closest -d -g $gf -a $gbed -b $iallbed > $cl_inv
+awk 'BEGIN{FS=OFS="\t"; {print "scaf\tstart\tend\tgene\tinv\tdistance"}} {print $1, $2, $3, $4, $10, $11}' $cl_inv > $cl_inv_ess
+
+```
+
+GO enrichment analysis
+
+```{r}
+#info about inversions, including whether they correlate with latitude
+inv_inf <- read_tsv("Inversion_info.txt")
+
+#distances of genes from inversions
+inv_dist <- read_tsv("closest_inversion_to_gene_essential.txt") %>% 
+  mutate(gene = str_extract(gene, "ID=(Ityp[0-9]+)", group = 1)) %>%
+  mutate(inv_overlap = ifelse(distance == 0, "yes", "no"))
+
+#read GO data (the file was prepared based on published annotations)
+GOIps <- read_tsv("Ityp_GO.txt") %>% filter(!is.na(GOs)) 
+
+#some genes are in > 1 inverson, so filter lists of genes on unique if needed
+inv_dist_GO <- inv_dist %>% left_join(GOIps, by = "gene") %>% filter(!is.na(GOs))
+
+#GO universe of all annotated genes
+#transform into the named list expected by topGO, note that we'll use only this one map so we can name it GOmap
+GOmapIps <-  GOIps %>% select(gene, GOs) %>% 
+  mutate(s=str_split(GOs,",")) %>% pull(s) %>% as.list()
+names(GOmapIps) <- GOIps$gene
+
+#all gene ids
+gGO_all <- GOIps$gene
+
+#genes in inversions Ips
+gGO_inv <- inv_dist_GO %>% filter(inv_overlap == "yes") %>% 
+  select(gene) %>% distinct(gene) %>% pull(gene)
+
+#genes in inversions correlating with latitude
+inv_corr <- inv_inf %>% filter(Corr_Lat == "YES") %>% pull(Inv_ID)
+gGO_invcorr <- inv_dist_GO %>% filter(inv_overlap == "yes", inv %in% inv_corr) %>% 
+  select(gene) %>% distinct(gene) %>% pull(gene)
+
+#named vector indicating whether any gene is among candidates
+geneListInv <- factor(as.integer(gGO_all %in% gGO_inv))
+names(geneListInv) <- gGO_all
+geneListInvCorr <- factor(as.integer(gGO_all %in% gGO_invcorr))
+names(geneListInvCorr) <- gGO_all
+
+GOenr_Inv_obj <- test3GOs(geneListInv, gomap = GOmapIps)
+GOenr_Inv_table <- lapply(GOenr_Inv_obj, "[[", "GenTable") %>% bind_rows() %>% mutate(wFisher = as.numeric(wFisher))
+GOenr_InvCorr_obj <- test3GOs(geneListInvCorr, gomap = GOmapIps)
+GOenr_InvCorr_table <- lapply(GOenr_InvCorr_obj, "[[", "GenTable") %>% bind_rows() %>% mutate(wFisher = as.numeric(wFisher))
+
+```
+
+GO categories significantly enriched in inversions
+
+```{r}
+kable(GOenr_Inv_table %>% filter(wFisher< 0.05) %>% arrange(wFisher))
+```
+
+GO categories significantly enriched in inversions that correlate with latitude
+
+
+```{r}
+kable(GOenr_InvCorr_table %>% filter(wFisher< 0.05) %>% arrange(wFisher))
+```
+
+# What are the genes closest to SNPs significant in GEA?
+
+Read LFMM results, we work on the dataset with inversions encoded as single loci.
+
+```{r}
+LFMM <- readRDS("IpsLFMM_results_merged_maf10_misSNP20_misind30_inversions_as_single_loci_PC1-3.rds") 
+LFMMsig <- LFMM %>% filter(pfdr < 0.05) %>% mutate(contig = paste0("IpsContig", chr))
+LFMMsigbed <- LFMMsig %>% 
+  transmute(contig = contig,
+            start = pos-1,
+            stop = pos)
+#write_tsv(LFMMsigbed, "SNP_signLFMM.bed", col_names = FALSE )
+```
+
+`bedtools closest` in command line
+
+```{bash, eval = FALSE}
+sort $sigLFMMbed -k1,1 -k2,2n | bedtools closest -d -g $gf -a - -b $gbed > $cl_sigLFMM
+
+awk 'BEGIN{FS=OFS="\t"; {print "scaf\tstart\tend\tgene\tdistance"}} {print $1, $2, $3, $7, $10}' $cl_sigLFMM > $cl_sigLFMM_ess
+```
+
+Get genes closest to significant SNPs
+
+```{r}
+#get all available descriptions for genes
+Ips_genes <- read_tsv("Ityp_GO.txt")
+
+#join all info for LFMM significant SNPs
+cl_LFMM <- read_tsv("closest_gene_to_LFMMsig_essential.txt") %>% 
+  mutate(gene = str_extract(gene, "ID=(Ityp[0-9]+)", group = 1)) %>% 
+  left_join(Ips_genes, by = "gene") %>% 
+  mutate(pos = end) %>% select(-c(start, end)) %>% 
+  rename(contig = scaf) %>% 
+  left_join(LFMMsig, by = c("pos", "contig")) %>% 
+  select(PC, p, pfdr, chr, contig, pos, distance, gene, description, GOs) %>% 
+  arrange(PC, pfdr)
+```
+
+Table with results for all significant SNPs
+
+```{r}
+kable(cl_LFMM)
+```
+
+Table with just nonredundant list of genes overlapping (`distance == 0`) significant SNPs
+
+```{r}
+g <- cl_LFMM %>% filter(distance == 0) %>% select(gene, description, GOs) %>% 
+  distinct() %>% filter(!is.na(description)) %>% arrange(gene)
+kable(g)
+```
